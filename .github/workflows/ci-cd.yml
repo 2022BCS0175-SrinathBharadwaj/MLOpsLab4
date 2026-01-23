@@ -1,0 +1,77 @@
+name: ML CI-CD Pipeline
+
+on:
+  push:
+    branches: [ main ]
+
+jobs:
+  train:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+
+    - name: Install dependencies
+      run: |
+        pip install -r requirements.txt
+
+    - name: Train model
+      run: |
+        python scripts/train.py
+
+    - name: Upload artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: model-artifacts
+        path: |
+          model.joblib
+          metrics.json
+
+  deploy:
+    needs: train
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Download artifacts
+      uses: actions/download-artifact@v4
+      with:
+        name: model-artifacts
+
+    - name: Compare metrics
+      id: compare
+      run: |
+        CURR_MSE=$(jq '.mse' metrics.json)
+        BEST_MSE=${{ vars.BEST_MSE }}
+
+        echo "Current MSE: $CURR_MSE"
+        echo "Best MSE: $BEST_MSE"
+
+        if (( $(echo "$CURR_MSE >= $BEST_MSE" | bc -l) )); then
+          echo "2022BCS0175----Metric did not improve"
+          exit 0
+        fi
+
+        echo "DEPLOY=true" >> $GITHUB_ENV
+
+    - name: Login to Docker Hub
+      if: env.DEPLOY == 'true'
+      run: |
+        echo "${{ secrets.DOCKERHUB_TOKEN }}" | docker login -u ${{ secrets.DOCKERHUB_USERNAME }} --password-stdin
+
+    - name: Build and Push Image
+      if: env.DEPLOY == 'true'
+      run: |
+        docker build -t ${{ secrets.DOCKERHUB_USERNAME }}/2022bcs0175-wine-api:latest .
+        docker push ${{ secrets.DOCKERHUB_USERNAME }}/2022bcs0175-wine-api:latest
+
+    - name: Update Best MSE
+      if: env.DEPLOY == 'true'
+      run: |
+        echo "BEST_MSE=$(jq '.mse' metrics.json)" >> $GITHUB_ENV
