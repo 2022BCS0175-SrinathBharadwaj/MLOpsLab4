@@ -5,11 +5,15 @@ on:
     branches: [ main ]
 
 jobs:
+  # -----------------------
+  # JOB 1: TRAIN (CI)
+  # -----------------------
   train:
     runs-on: ubuntu-latest
 
     steps:
-    - uses: actions/checkout@v4
+    - name: Checkout repository
+      uses: actions/checkout@v4
 
     - name: Set up Python
       uses: actions/setup-python@v5
@@ -24,7 +28,7 @@ jobs:
       run: |
         python scripts/train.py
 
-    - name: Upload artifacts
+    - name: Upload model artifacts
       uses: actions/upload-artifact@v4
       with:
         name: model-artifacts
@@ -32,12 +36,16 @@ jobs:
           model.joblib
           metrics.json
 
+  # -----------------------
+  # JOB 2: DEPLOY (CD)
+  # -----------------------
   deploy:
     needs: train
     runs-on: ubuntu-latest
 
     steps:
-    - uses: actions/checkout@v4
+    - name: Checkout repository
+      uses: actions/checkout@v4
 
     - name: Download artifacts
       uses: actions/download-artifact@v4
@@ -45,33 +53,39 @@ jobs:
         name: model-artifacts
 
     - name: Compare metrics
-      id: compare
       run: |
-        CURR_MSE=$(jq '.mse' metrics.json)
+        CURR_MSE=$(jq -r '.mse' metrics.json)
         BEST_MSE=${{ vars.BEST_MSE }}
 
         echo "Current MSE: $CURR_MSE"
         echo "Best MSE: $BEST_MSE"
 
-        if (( $(echo "$CURR_MSE >= $BEST_MSE" | bc -l) )); then
-          echo "2022BCS0175----Metric did not improve"
-          exit 0
-        fi
+        python - <<EOF
+import sys
+curr = float("$CURR_MSE")
+best = float("$BEST_MSE")
+
+if curr >= best:
+    print("2022BCS0175----Metric did not improve")
+    sys.exit(0)
+else:
+    print("Metric improved, proceeding to deploy")
+EOF
 
         echo "DEPLOY=true" >> $GITHUB_ENV
 
     - name: Login to Docker Hub
       if: env.DEPLOY == 'true'
       run: |
-        echo "${{ secrets.DOCKERHUB_TOKEN }}" | docker login -u ${{ secrets.DOCKERHUB_USERNAME }} --password-stdin
+        echo "${{ secrets.DOCKERHUB_TOKEN }}" | docker login \
+        -u ${{ secrets.DOCKERHUB_USERNAME }} --password-stdin
 
-    - name: Build and Push Image
+    - name: Build Docker image
       if: env.DEPLOY == 'true'
       run: |
         docker build -t ${{ secrets.DOCKERHUB_USERNAME }}/2022bcs0175-wine-api:latest .
-        docker push ${{ secrets.DOCKERHUB_USERNAME }}/2022bcs0175-wine-api:latest
 
-    - name: Update Best MSE
+    - name: Push Docker image
       if: env.DEPLOY == 'true'
       run: |
-        echo "BEST_MSE=$(jq '.mse' metrics.json)" >> $GITHUB_ENV
+        docker push ${{ secrets.DOCKERHUB_USERNAME }}/2022bcs0175-wine-api:latest
