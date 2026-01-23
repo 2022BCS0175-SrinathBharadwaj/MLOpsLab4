@@ -61,19 +61,19 @@ jobs:
         echo "Best MSE: $BEST_MSE"
 
         python <<EOF
-        import sys
+        import os
 
         curr = float("$CURR_MSE")
         best = float("$BEST_MSE")
 
-        if curr >= best:
-            print("2022BCS0175----Metric did not improve")
-            sys.exit(0)
-        else:
+        if curr < best:
             print("Metric improved, proceeding to deploy")
+            with open(os.environ["GITHUB_ENV"], "a") as f:
+                f.write("DEPLOY=true\n")
+        else:
+            print("2022BCS0175----Metric did not improve")
         EOF
 
-        echo "DEPLOY=true" >> $GITHUB_ENV
 
 
     - name: Login to Docker Hub
