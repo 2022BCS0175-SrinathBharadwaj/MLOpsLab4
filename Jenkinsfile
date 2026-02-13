@@ -16,16 +16,24 @@ pipeline {
         }
 
         stage('Install Dependencies') {
-            steps {
-                sh 'pip install -r requirements.txt'
-            }
-        }
-
-        stage('Train Model') {
-            steps {
-                sh 'python scripts/train.py'
-            }
-        }
+    		steps {
+        		sh '''
+        		python3 -m venv venv
+        		. venv/bin/activate
+        		pip install --upgrade pip
+        		pip install -r requirements.txt
+    	    		'''
+    		}
+	}
+	
+	stage('Train Model') {
+    steps {
+        sh '''
+        . venv/bin/activate
+        python scripts/train.py
+        '''
+    }
+}
 
         stage('Print Metrics') {
             steps {
