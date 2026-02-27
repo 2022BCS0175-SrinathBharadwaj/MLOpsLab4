@@ -2,66 +2,105 @@ pipeline {
     agent any
 
     environment {
-        DOCKERHUB_USER = "2022bcs0175srinathbharadwaj"
-        IMAGE_NAME = "2022bcs0175-wine-api"
-        BEST_MSE = "9999"
+        IMAGE = "2022bcs0175srinathbharadwaj/2022bcs0175-wine-api:latest"
+        CONTAINER = "wine-api-test"
+        PORT = "8000"
     }
 
     stages {
 
-        stage('Checkout Code') {
+        stage('Pull Image') {
             steps {
-                git branch: 'main', url: 'https://github.com/2022BCS0175-SrinathBharadwaj/MLOpsLab4.git'
+                sh "docker pull ${IMAGE}"
             }
         }
 
-        stage('Install Dependencies') {
-    		steps {
-        		sh '''
-        		python3 -m venv venv
-        		. venv/bin/activate
-        		pip install --upgrade pip
-        		pip install -r requirements.txt
-    	    		'''
-    		}
-	}
-	
-	stage('Train Model') {
-    steps {
-        sh '''
-        . venv/bin/activate
-        python scripts/train.py
-        '''
-    }
-}
+        stage('Run Container') {
+            steps {
+                sh """
+                docker run -d -p ${PORT}:${PORT} --name ${CONTAINER} ${IMAGE}
+                """
+            }
+        }
 
-        stage('Print Metrics') {
+        stage('Wait for API') {
             steps {
                 script {
-                    def metrics = readJSON file: 'metrics.json'
-                    echo "Name: Srinath Bharadwaj"
-                    echo "Roll No: 2022BCS0175"
-                    echo "MSE: ${metrics.mse}"
+                    sleep(10)
                 }
             }
         }
 
-        stage('Build Docker Image') {
+        stage('Valid Inference Test') {
             steps {
-                sh "docker build -t ${DOCKERHUB_USER}/${IMAGE_NAME}:latest ."
+                script {
+                    def response = sh(
+                        script: """
+                        curl -s -X POST http://localhost:${PORT}/predict \
+                        -H "Content-Type: application/json" \
+                        -d '{
+                            "fixed acidity": 7.4,
+                            "volatile acidity": 0.7,
+                            "citric acid": 0,
+                            "residual sugar": 1.9,
+                            "chlorides": 0.076,
+                            "free sulfur dioxide": 11,
+                            "total sulfur dioxide": 34,
+                            "density": 0.9978,
+                            "pH": 3.51,
+                            "sulphates": 0.56,
+                            "alcohol": 9.4
+                        }'
+                        """,
+                        returnStdout: true
+                    ).trim()
+
+                    echo "Valid Response: ${response}"
+
+                    if (!response.contains("wine_quality")) {
+                        error("Prediction missing in valid response")
+                    }
+                }
             }
         }
 
-        stage('Push to Docker Hub') {
+        stage('Invalid Input Test') {
             steps {
-                withCredentials([usernamePassword(credentialsId: 'dockerhub-creds',
-                                                  usernameVariable: 'USERNAME',
-                                                  passwordVariable: 'PASSWORD')]) {
+                script {
+                    def bad = sh(
+                        script: """
+                        curl -s -X POST http://localhost:${PORT}/predict \
+                        -H "Content-Type: application/json" \
+                        -d '{"fixed acidity":"invalid"}'
+                        """,
+                        returnStdout: true
+                    ).trim()
 
-                    sh 'echo $PASSWORD | docker login -u $USERNAME --password-stdin'
-                    sh "docker push ${DOCKERHUB_USER}/${IMAGE_NAME}:latest"
+                    echo "Invalid Response: ${bad}"
+
+                    if (!bad.toLowerCase().contains("error")) {
+                        error("Invalid input did not trigger error")
+                    }
                 }
             }
+        }
+
+        stage('Stop Container') {
+            steps {
+                sh """
+                docker stop ${CONTAINER} || true
+                docker rm ${CONTAINER} || true
+                """
+            }
+        }
+    }
+
+    post {
+        success {
+            echo "Inference Validation PASSED ✅"
+        }
+        failure {
+            echo "Inference Validation FAILED ❌"
         }
     }
 }
