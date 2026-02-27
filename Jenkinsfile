@@ -71,7 +71,7 @@ pipeline {
 
                     echo "Invalid Response: ${bad}"
 
-                    if (!bad.toLowerCase().contains("error")) {
+                    if (!bad.toLowerCase().contains("detail")) {
                         error("Invalid input did not trigger error")
                     }
                 }
