@@ -16,12 +16,13 @@ pipeline {
         }
 
         stage('Run Container') {
-            steps {
-                sh """
-                docker run -d -p ${PORT}:${PORT} --name ${CONTAINER} ${IMAGE}
-                """
-            }
-        }
+    steps {
+        sh """
+        docker rm -f ${CONTAINER} || true
+        docker run -d -p ${PORT}:${PORT} --name ${CONTAINER} ${IMAGE}
+        """
+    }
+}
 
         stage('Wait for API') {
             steps {
